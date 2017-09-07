@@ -1,0 +1,215 @@
+---
+title: "TS series algorithms comparison"
+author: "Mingxi Li @ Statistics Department, Leiden University"
+date: "7 september 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r basic settings}
+rm(list = ls())
+mu1 <- c(0.45, 0.45, 0.45, 0.45, 0.5) # true win rates combination, hard picking
+mu2 <- c(0.1, 0.3, 0.5, 0.7, 0.9) # true win rates combination, easy picking
+n <- 5 # arm number
+t <- 1000 # play times
+# The higher play times the more accurate to pick out the right arm.
+r <- 100 # experiment repeat times
+```
+
+## 1.Vanilla Thompson Sampling
+
+```{r Vanilla TS Funciton}
+vanilla.TS <- function(n, t, mu) {
+  prior <- matrix(NA, nrow = t, ncol = n)
+  s <- f <- rep(1, n)
+  rt <- NULL
+  arm <- NULL
+  for(i in 1:t) {
+    for(j in 1:n) {
+      prior[i, j] <- rbeta(1, s[j], f[j])
+    }
+    arm[i] <- which.max(prior[i, ])
+    rt[i] <- rbinom(1, 1, mu[arm[i]])
+    
+    if(rt[i] == 1) {
+      s[arm[i]] <- s[arm[i]] + 1
+    } else {f[arm[i]] <- f[arm[i]] + 1}
+  }
+  # choose the posterior maximum of mu, and recommend an arm:
+  recommend <- which.max(s / (s + f))
+  return(recommend)
+}
+```
+
+##2.Top-Two Thompson Sampling
+
+```{r TTTS Function}
+beta <- 1/2 # to guaratee the selection is random
+TTTS <- function(n, t, mu) {
+  prior <- matrix(NA, nrow = t, ncol = n)
+  I <- J <- B <- rt <- NULL
+  play.ttts <- NULL
+  s <- f <- rep(1, n)
+  rt <- NULL
+  for(i in 1:t) {
+    # choose best arm from sample set I:
+    for(j in 1:n) {
+       prior[i, j] <- rbeta(1, s[j], f[j])
+    }
+    I[i] <- which.max(prior[i, ])
+    # running Binom() to selet sample set:
+    B[i] <- rbinom(1, 1, beta)
+    if(B[i] == 1) {
+      play.ttts[i] <- I[i]
+    } else {
+      repeat {
+        for(j in 1:n) {
+          prior[i, j] <- rbeta(1, s[j], f[j])
+        }
+        J[i] <- which.max(prior[i, ])
+        if(I[i] != J[i]) {
+          play.ttts[i] <- J[i]
+          break
+        }
+      }
+    }
+    rt[i] <- rbinom(1, 1, mu[play.ttts[i]])
+    if(rt[i] == 1) {
+      s[play.ttts[i]] <- s[play.ttts[i]] + 1
+    } else {f[play.ttts[i]] <- f[play.ttts[i]] + 1}
+  }
+  recommend <- which.max(s / (s + f))
+  return(recommend)
+}
+```
+
+##3.Fake Top-Two Thompson Sampling
+
+```{r fake TTTS function}
+beta <- 1/2
+fake.TTTS <- function(n, t, mu) {
+  prior <- matrix(NA, nrow = t, ncol = n)
+  I <- J <- B <- rt <- NULL
+  play.ttts <- NULL
+  s <- f <- rep(1, n)
+  rt <- NULL
+  for(i in 1:t) {
+    # choose best arm from sample set I:
+    for(j in 1:n) {
+       prior[i, j] <- rbeta(1, s[j], f[j])
+    }
+    I[i] <- which.max(prior[i, ])
+
+    B[i] <- rbinom(1, 1, beta)
+    if(B[i] == 1) {
+      play.ttts[i] <- I[i]
+    } else {
+      play.ttts[i] <- which.max(prior[i, ][-I[i]])
+    }
+    rt[i] <- rbinom(1, 1, mu[play.ttts[i]])
+    if(rt[i] == 1) {
+      s[play.ttts[i]] <- s[play.ttts[i]] + 1
+    } else {f[play.ttts[i]] <- f[play.ttts[i]] + 1}
+  }
+  recommend <- which.max(s / (s + f))
+  return(recommend)
+}
+```
+
+##4.Top-two Gibbs Thompson Sampling
+
+```{r TTGTS multi-arms}
+TTGTS <- function(n, t, mu, iter) {
+  prior <- matrix(NA, nrow = t, ncol = n)
+  v <- u <- NULL
+  I <- J <- B <- rt <- NULL
+  s <- f <- rep(1, n)
+  play.gitts <- NULL
+  for(i in 1:t) {
+    for(j in 1:n) {
+      prior[i, j] <- rbeta(1, s[j], f[j])
+    }
+    I[i] <- which.max(prior[i, ])
+    B[i] <- rbinom(1, 1, 0.5)
+    if(B[i] == 1) {
+      play.gitts[i] <- which.max(prior[i, ])
+      } else {
+      prior[i, ] <- c(0.5, 0.5, 0.5, 0.5, 0.5)  # make arm i not the best
+      for(k in 1:iter) { # iter = 25 is an arbitrary value
+        for(j in 1:n) {
+          if(j != I[i]){
+            if(prior[i, I[i]] > max(prior[i, - c(I[i], j)])) {
+              v[j] <- pbeta(prior[i, I[i]], s[j], f[j])
+              u[j] <- runif(1, v[j], 1)
+              prior[i, j] <- qbeta(u[j], s[j], f[j])
+              } else {prior[i, j] <- rbeta(1, s[j], f[j])}
+            }
+          else {
+            v[j] <- pbeta(max(prior[i, -j]), s[j], f[j])
+            u[j] <- runif(1, 0, v[j])
+            prior[i, j] <- qbeta(u[j], s[j], f[j])
+          }
+        }
+      }
+      play.gitts[i] <- which.max(prior[i, ])
+    }
+    rt[i] <- rbinom(1, 1, mu[play.gitts[i]]) 
+    if(rt[i] == 1) {
+      s[play.gitts[i]] <- s[play.gitts[i]] + 1
+    } else { f[play.gitts[i]] <- f[play.gitts[i]] + 1 }
+  }
+  recommend <- which.max(s / (s + f))
+  return(recommend)
+} 
+```
+
+##5.Uniform Sampling (same level as TTTS)
+
+```{r uniform sampling function}
+unif <- function(n, t, mu) {
+  prior <- matrix(NA, nrow = t, ncol = n)
+  s <- f <- rep(0, n)
+  rt <- NULL
+  arm <- NULL
+  for(j in 1:n) {
+    for(i in 1:(t/n)) {
+      rt[i] <- rbinom(1, 1, mu[j])
+      if(rt[i] == 1){
+        s[j] <- s[j] + 1
+      } else {f[j] <- f[j] + 1}
+    }
+  }
+  recommend <- which.max(s / (s + f))
+  return(recommend)
+}
+```
+
+# Test
+
+```{r rate of picking right arm}
+set.seed(1234)
+# for combination (0.45, 0.45, 0.45, 0.45, 0.5)
+test <- replicate(r, vanilla.TS(n, t, mu1))
+sum(test == "5") / r
+test <- replicate(r, TTTS(n, t, mu1))
+sum(test == "5") / r 
+test <- replicate(r, fake.TTTS(n, t, mu1))
+sum(test == "5") / r
+test <- replicate(r, TTGTS(n, t, mu1, iter = 25))
+sum(test == "5") / r 
+test <- replicate(r, unif(n, t, mu1))
+sum(test == "5") / r 
+
+# for combination (0.1, 0.3, 0.5, 0.7, 0.9)
+test <- replicate(r, vanilla.TS(n, t, mu2))
+sum(test == "5") / r
+test <- replicate(r, TTTS(n, t, mu2))
+sum(test == "5") / r 
+test <- replicate(r, fake.TTTS(n, t, mu2))
+sum(test == "5") / r
+test <- replicate(r, TTGTS(n, t, mu2, iter = 25))
+sum(test == "5") / r 
+test <- replicate(r, unif(n, t, mu2))
+sum(test == "5") / r 
+```

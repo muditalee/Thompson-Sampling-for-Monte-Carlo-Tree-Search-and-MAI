@@ -1,0 +1,209 @@
+---
+title: "Time Division Method"
+author: "Mingxi Li @ Statistics Department, Leiden University"
+date: "7 september 2017"
+output: html_document
+---
+
+```{r benchmark true win rate combination}
+rm(list = ls())
+# classic mu combination from "a new bandit framework for games"
+mu1 <- c(0.5, 0.45, 0.55)
+mu2 <- c(0.6, 0.4, 0.35)
+mu3 <- c(0.3, 0.47, 0.52)
+```
+
+## I. Thompson Sampling apply to time division method
+
+1. Vanilla Thompson Sampling for Leaf
+
+```{r TS for leaf}
+TS <- function(t, mu) {
+  n <- length(mu)
+  prior <- matrix(NA, nrow = t, ncol = n)
+  s <- f <- rep(1, n)
+  rt <- NULL
+  arm <- NULL
+  if(t != 0) {
+    for(i in 1:t) {
+      for(j in 1:n) {
+        prior[i, j] <- rbeta(1, s[j], f[j])
+      }
+      arm[i] <- which.max(prior[i, ])
+      rt[i] <- rbinom(1, 1, mu[arm[i]])
+      if(rt[i] == 1) {
+        s[arm[i]] <- s[arm[i]] + 1
+      } else {f[arm[i]] <- f[arm[i]] + 1}
+    }
+  }
+  recommend <- which.max(s / (s + f))
+  return(c(recommend, f[recommend], s[recommend]))
+}
+```
+
+2. Transformed Thompson Sampling for Root
+
+```{r TS for root}
+TS.root <- function(t, mu, s, f) {
+  n <- length(mu)
+  prior <- matrix(NA, nrow = t, ncol = n)
+  rt <- NULL
+  arm <- NULL
+  if(t !=0) {
+  for(i in 1:t) {
+    for(j in 1:n) {
+      prior[i, j] <- rbeta(1, s[j], f[j])
+    }
+    arm[i] <- which.max(prior[i, ])
+    rt[i] <- rbinom(1, 1, mu[arm[i]])
+    if(rt[i] == 1) {
+      s[arm[i]] <- s[arm[i]] + 1
+    } else {f[arm[i]] <- f[arm[i]] + 1}
+    }
+  }
+  recommend <- which.max(s / (s + f))
+  return(recommend)
+}
+```
+
+3. Final Algorithm (TS)
+
+```{r time division function TS}
+td.TS <- function(mu1, mu2, mu3, t.leaf1, t.leaf2, t.leaf3, t.root, rep) {
+  maximin.ts <- NULL
+  for (i in 1:rep) {
+    ts1 <- TS(t.leaf1, (1 - mu1))
+    ts2 <- TS(t.leaf2, (1 - mu2))
+    ts3 <- TS(t.leaf3, (1 - mu3))
+    mu <- c(mu1[ts1[1]], mu2[ts2[1]], mu3[ts3[1]])
+    s <- c(ts1[2], ts2[2], ts3[2])
+    f <- c(ts1[3], ts2[3], ts3[3])
+    maximin.ts[i] <- TS.root(t.root, mu, s, f) 
+  }
+  # error rate
+  err.prob <- (rep - as.numeric(table(maximin.ts)[1])) / rep
+  return(err.prob)
+}
+```
+
+## Top-two Gibbs Thompson Sampling apply to time division method
+
+1. Top-two Gibbs Thompson Sampling for Leaf
+
+```{r TTGTS for leaf}
+TTGTS <- function(n, t, mu, iter = 25) {
+  prior <- matrix(NA, nrow = t, ncol = n)
+  v <- u <- NULL
+  I <- J <- B <- rt <- NULL
+  s <- f <- rep(1, n)
+  play.gitts <- NULL
+  if(t != 0) {
+  for(i in 1:t) {
+    for(j in 1:n) {
+      prior[i, j] <- rbeta(1, s[j], f[j])
+    }
+    I[i] <- which.max(prior[i, ])
+    B[i] <- rbinom(1, 1, 0.5)
+    if(B[i] == 1) {
+      play.gitts[i] <- which.max(prior[i, ])
+      } else {
+      prior[i, ] <- c(0.5, 0.5, 0.5)  # make arm i not the best
+      for(k in 1:iter) {
+        for(j in 1:n) {
+          if(j != I[i]){
+            if(prior[i, I[i]] > max(prior[i, - c(I[i], j)])) {
+              v[j] <- pbeta(prior[i, I[i]], s[j], f[j])
+              u[j] <- runif(1, v[j], 1)
+              prior[i, j] <- qbeta(u[j], s[j], f[j])
+              } else {prior[i, j] <- rbeta(1, s[j], f[j])}
+            }
+          else {
+            v[j] <- pbeta(max(prior[i, -j]), s[j], f[j])
+            u[j] <- runif(1, 0, v[j])
+            prior[i, j] <- qbeta(u[j], s[j], f[j])
+          }
+        }
+      }
+      play.gitts[i] <- which.max(prior[i, ])
+    }
+    rt[i] <- rbinom(1, 1, mu[play.gitts[i]]) 
+    if(rt[i] == 1) {
+      s[play.gitts[i]] <- s[play.gitts[i]] + 1
+    } else { f[play.gitts[i]] <- f[play.gitts[i]] + 1 }
+  }
+  }
+  recommend <- which.max(s / (s + f))
+  return(c(recommend, f[recommend], s[recommend]))
+} 
+```
+
+2. Transformed Top-two Gibbs Thompson Sampling for Root
+
+```{r TTGTS for root}
+TTGTS.root <- function(n, t, mu, iter = 25, s, f) {
+  prior <- matrix(NA, nrow = t, ncol = n)
+  v <- u <- NULL
+  I <- J <- B <- rt <- NULL
+  play.gitts <- NULL
+  if(t != 0) {
+  for(i in 1:t) {
+    for(j in 1:n) {
+      prior[i, j] <- rbeta(1, s[j], f[j])
+    }
+    I[i] <- which.max(prior[i, ])
+    B[i] <- rbinom(1, 1, 0.5)
+    if(B[i] == 1) {
+      play.gitts[i] <- which.max(prior[i, ])
+      } else {
+      prior[i, ] <- c(0.5, 0.5, 0.5)  # make arm i not the best
+      for(k in 1:iter) {
+        for(j in 1:n) {
+          if(j != I[i]){
+            if(prior[i, I[i]] > max(prior[i, - c(I[i], j)])) {
+              v[j] <- pbeta(prior[i, I[i]], s[j], f[j])
+              u[j] <- runif(1, v[j], 1)
+              prior[i, j] <- qbeta(u[j], s[j], f[j])
+              } else {prior[i, j] <- rbeta(1, s[j], f[j])}
+            }
+          else {
+            v[j] <- pbeta(max(prior[i, -j]), s[j], f[j])
+            u[j] <- runif(1, 0, v[j])
+            prior[i, j] <- qbeta(u[j], s[j], f[j])
+          }
+        }
+      }
+      play.gitts[i] <- which.max(prior[i, ])
+    }
+    rt[i] <- rbinom(1, 1, mu[play.gitts[i]]) 
+    if(rt[i] == 1) {
+      s[play.gitts[i]] <- s[play.gitts[i]] + 1
+    } else { f[play.gitts[i]] <- f[play.gitts[i]] + 1 }
+  }
+  }
+  recommend <- which.max(s / (s + f))
+  return(recommend)
+} 
+```
+
+3. Final Algorithm (TTGTS)
+
+```{r time division function TTGTS}
+# repeat the games 1000 times, get the error probabilities:
+td.TTGTS <- function(n, mu1, mu2, mu3, t.leaf1, t.leaf2, t.leaf3, t.root, iter=25) {
+  maximin.ttgts <- NULL
+  for (i in 1:1000) {
+    ttgts1 <- TTGTS(n, t.leaf1, (1 - mu1), iter)
+    ttgts2 <- TTGTS(n, t.leaf2, (1 - mu2), iter)
+    ttgts3 <- TTGTS(n, t.leaf3, (1 - mu3), iter)
+    mu <- c(mu1[ttgts1[1]], mu2[ttgts2[1]], mu3[ttgts3[1]])
+    s <- c(ttgts1[2], ttgts2[2], ttgts3[2])
+    f <- c(ttgts1[3], ttgts2[3], ttgts3[3])
+    maximin.ttgts[i] <- TTGTS.root(n, t.root, mu, iter, s, f) 
+  }
+  # error rate
+  err.prob <- (1000 - as.numeric(table(maximin.ttgts)[1])) / 1000
+  return(err.prob)
+}
+```
+
+

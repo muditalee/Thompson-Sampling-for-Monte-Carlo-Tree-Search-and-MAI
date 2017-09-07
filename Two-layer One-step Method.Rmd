@@ -1,0 +1,72 @@
+---
+title: "Two-layer One-step Method"
+author: "Mingxi Li @ Statistics Department, Leiden University"
+date: "June 8, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+rm(list = ls())
+set.seed(1234)
+library(matrixStats)
+```
+
+```{r benchmark true win rate combination}
+mu1 <- c(0.5, 0.45, 0.55)
+mu2 <- c(0.6, 0.4, 0.35)
+mu3 <- c(0.3, 0.47, 0.52)
+mu <- rbind(mu1, mu2, mu3)
+```
+
+## Thompson Sampling apply to Two-layer One-step method
+
+```{r two-layer one-step TS}
+TS2.0 <- function(t, mu) {
+  s <- f <- rec.arm <- matrix(1, nrow = nrow(mu), ncol = ncol(mu))
+  prior <- NULL
+  arm.within <- NULL
+  mu.within <- NULL
+  rt <- NULL
+  if(t != 0) {  
+    for(i in 1:t) {
+      for(k in 1:nrow(mu)) {
+        for(j in 1:ncol(mu)) {
+          prior[j] <- rbeta(1, s[k, j], f[k, j])
+        }
+        arm.within[k] <- which.min(prior)  # select the largest arm within group
+        mu.within[k] <- prior[arm.within[k]]
+      }
+        arm.between <- which.max(mu.within)
+        rt <- rbinom(1, 1, mu[arm.between, arm.within[arm.between]])  
+        if(rt == 1) {
+          s[arm.between, arm.within[arm.between]] <- s[arm.between, arm.within[arm.between]] + 1
+        } else {f[arm.between, arm.within[arm.between]] <- f[arm.between, arm.within[arm.between]] + 1}
+    }
+  }
+ recommend.group <- which.max(rowMins(s/(s+f)))
+ return(recommend.group)
+}
+```
+
+## Performance Test
+
+```{r test, eval=FALSE, echo=FALSE}
+# t=600, repeat=1000:
+set.seed(1234)
+testTS2 <- replicate(1000, expr = TS2.0(600, mu))
+err.ts1 <- 1 - as.numeric(table(testTS2)[1]) / 1000  # 0.061
+err.td1 <- td.TS(mu1, mu2, mu3, 150, 150, 150, 150, 1000)  # 0.05
+cbind(err.ts1, err.td1)
+
+# t=6000, repeat=100:
+testTS2.1 <- replicate(100, expr = TS2.0(6000, mu))
+err.ts2 <- 1 - as.numeric(table(testTS2.1)[1]) / 100  # 0
+err.td2 <- td.TS(mu1, mu2, mu3, 1500, 1500, 1500, 1500, 100)  # 0.03
+cbind(err.ts2, err.td2)
+
+sqrt(- log(0.95 / 2) / 1200)
+sqrt(- log(0.95 / 2) / 12000)
+```
+
